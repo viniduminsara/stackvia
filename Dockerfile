@@ -24,11 +24,14 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV DATA_DIR=/app/data
+RUN apk add --no-cache su-exec
 COPY --from=backend-builder /app/node_modules ./node_modules
 COPY --from=backend-builder /app/backend/package.json ./backend/package.json
 COPY --from=backend-builder /app/backend/dist ./backend/dist
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /app/data && chown -R node:node /app
-USER node
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "backend/dist/server.js"]

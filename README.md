@@ -11,7 +11,7 @@ Stackvia is a Lightweight, self-hosted tool that combines Docker container resou
 
 ## Getting started
 
-Stackvia reads Docker through `/var/run/docker.sock`. It runs as an unprivileged user, so its supplementary group must match the group ID (GID) assigned to that socket on the host.
+Stackvia reads Docker through `/var/run/docker.sock`. The container now detects the socket's group ID at startup, joins that group automatically, and then drops to the unprivileged app user.
 
 ### 1. Prerequisites
 
@@ -31,26 +31,7 @@ Set `ENCRYPTION_KEY` in `.env` to a long, random value:
 openssl rand -hex 32
 ```
 
-Then assign the Docker socket group ID to `DOCKER_GID` in that same `.env` file.
-
-On **Docker Desktop for macOS or Windows**, use `0`. Docker Desktop exposes the mounted socket inside Linux containers as `root:root` even when the host-side socket reports a different group.
-
-```dotenv
-DOCKER_GID=0
-```
-
-On a **native Linux Docker Engine** host, use the host socket's numeric GID:
-
-```sh
-stat -c '%g' /var/run/docker.sock
-```
-
-For example, if the Linux command prints `998`, the relevant part of `.env` is:
-
-```dotenv
-ENCRYPTION_KEY=paste-the-generated-secret-here
-DOCKER_GID=998
-```
+No Docker socket group setting is needed anymore. Keep `ENCRYPTION_KEY` in place, and Stackvia will adapt to Docker Desktop or native Linux automatically.
 
 ### 3. Build and start Stackvia
 
@@ -73,7 +54,7 @@ The response should contain `"connected":true` and `"mode":"docker"`.
 
 ## Troubleshooting Docker access
 
-`connect EACCES /var/run/docker.sock` means Stackvia can see the socket but does not have permission to use it. On Docker Desktop, set `DOCKER_GID=0`; on native Linux, use the group ID reported by `stat -c '%g' /var/run/docker.sock`. Then recreate the service so Compose applies the supplementary group:
+`connect EACCES /var/run/docker.sock` usually means the host socket is not readable by the container or the bind mount is missing. Stackvia now handles the common Docker Desktop and native Linux cases automatically, so you should not need to set a socket GID by hand.
 
 ```sh
 docker compose down
@@ -87,7 +68,7 @@ docker compose exec stackvia ls -ln /var/run/docker.sock
 docker compose exec stackvia id
 ```
 
-The numeric group displayed by the first command must appear in the `groups=` output of the second. If your socket is mode `0600`, group access alone cannot work; change the host's Docker socket policy or use a socket proxy.
+If the socket shows mode `0600`, group access alone cannot work; change the host's Docker socket policy or use a socket proxy. If you are on a very locked-down host and the entrypoint cannot add the socket group, the next step is to confirm the Docker daemon exposes the socket with a group-readable mode such as `0660`.
 
 If `docker ps` fails on the host, resolve that first (on Linux this commonly means adding your user to the host's `docker` group, then starting a new login session). Do not solve the problem by making the socket world-writable.
 
