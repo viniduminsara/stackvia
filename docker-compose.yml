@@ -1,0 +1,18 @@
+services:
+  stackvia:
+    build: .
+    container_name: stackvia
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DATA_DIR: /app/data
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    # Lets the unprivileged `node` user read the host Docker socket without running the app as root.
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID in .env; see README}"
+    volumes:
+      - ./data:/app/data
+      # Read-only still exposes powerful host control. Prefer a socket proxy in production.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
