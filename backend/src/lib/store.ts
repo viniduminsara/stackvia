@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { ContainerSnapshot, DatabaseConnection } from '../types.js';
+import type { ContainerSnapshot, DatabaseConnection, AdminUser } from '../types.js';
 
 const dataFile = resolve(process.env.DATA_DIR ?? './data', 'stackvia.db');
 mkdirSync(dirname(dataFile), { recursive: true });
@@ -30,6 +30,13 @@ db.exec(`
     encrypted_uri TEXT NOT NULL,
     iv TEXT NOT NULL,
     auth_tag TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS admin_user (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    username TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
 `);
@@ -125,3 +132,28 @@ export function createDatabaseConnection(connection: {
 export function deleteDatabaseConnection(id: string) {
   return deleteConnectionStatement.run(id);
 }
+
+const getAdminStatement = db.prepare(`
+  SELECT username, password_hash AS passwordHash, created_at AS createdAt
+  FROM admin_user
+  WHERE id = 1
+`);
+
+const insertAdminStatement = db.prepare(`
+  INSERT INTO admin_user (id, username, password_hash, created_at)
+  VALUES (1, @username, @passwordHash, @createdAt)
+`);
+
+export function getAdmin(): AdminUser | undefined {
+  return getAdminStatement.get() as AdminUser | undefined;
+}
+
+export function createAdmin(username: string, passwordHash: string): boolean {
+  const result = insertAdminStatement.run({
+    username,
+    passwordHash,
+    createdAt: Date.now()
+  });
+  return result.changes > 0;
+}
+

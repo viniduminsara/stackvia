@@ -2,9 +2,10 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app
 COPY package.json ./
+COPY package-lock.json ./
 COPY frontend/package.json ./frontend/package.json
 COPY backend/package.json ./backend/package.json
-RUN npm install --workspace=@stackvia/frontend --include-workspace-root
+RUN npm ci --workspace=@stackvia/frontend --include-workspace-root
 COPY frontend ./frontend
 COPY backend/tsconfig.json ./backend/tsconfig.json
 RUN npm run build --workspace=@stackvia/frontend
@@ -14,9 +15,13 @@ FROM node:20-alpine AS backend-builder
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package.json ./
+COPY package-lock.json ./
 COPY backend/package.json ./backend/package.json
 COPY frontend/package.json ./frontend/package.json
-RUN npm install --workspace=@stackvia/backend --include-workspace-root
+# Force a local source build so better-sqlite3 does not depend on a remote prebuild.
+ENV npm_config_build_from_source=true
+ENV npm_config_nodedir=/usr/local
+RUN npm ci --workspace=@stackvia/backend --include-workspace-root
 COPY backend ./backend
 RUN npm run build --workspace=@stackvia/backend && npm prune --omit=dev
 

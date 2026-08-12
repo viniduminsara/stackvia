@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   createDatabaseConnection,
   deleteDatabaseConnection,
@@ -15,6 +16,14 @@ import {
 } from '../lib/mongo.js';
 
 export const databasesRouter = Router();
+
+databasesRouter.use(rateLimit({
+  windowMs: 60 * 1000,
+  limit: 100,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please slow down' }
+}));
 
 function respondError(res: Parameters<typeof databasesRouter.get>[1] extends (...args: infer Args) => unknown ? Args[1] : never, status: number, message: string) {
   return res.status(status).json({ error: message });
@@ -43,6 +52,24 @@ function resolveDatabaseName(uri: string, explicit?: string, fallback?: string) 
   } catch {
     return 'admin';
   }
+}
+
+const BLOCKED_OPERATORS = new Set(['$where', '$function', '$accumulator', '$expr']);
+
+function sanitizeFilter(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeFilter);
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (!BLOCKED_OPERATORS.has(key)) {
+        result[key] = sanitizeFilter(val);
+      }
+    }
+    return result;
+  }
+  return value;
 }
 
 databasesRouter.get('/', (_req, res) => {
@@ -320,7 +347,7 @@ databasesRouter.get('/:id/collections/:collection/documents', async (req, res) =
     if (filterText) {
       try {
         const parsed = JSON.parse(filterText);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) filter = parsed as Record<string, unknown>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) filter = sanitizeFilter(parsed) as Record<string, unknown>;
         else return respondError(res, 400, 'Filter must be a JSON object');
       } catch {
         return respondError(res, 400, 'Filter must be valid JSON');

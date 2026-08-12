@@ -16,6 +16,7 @@ import {
   type DatabaseOverview,
   type CollectionStats
 } from './hooks/useDatabases';
+import { useAuth } from './hooks/useAuth';
 
 type ContainerStateFilter = 'all' | 'running' | 'paused' | 'exited' | 'unknown';
 
@@ -852,8 +853,152 @@ function DatabaseWorkspace({
   );
 }
 
-export function App() {
-  const { snapshots, status, isStreaming } = useLiveContainers();
+function AuthCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="auth-gate">
+      <div className="auth-card">
+        <div className="auth-logo">
+          <span className="auth-logo-mark">S</span>
+          <span className="auth-logo-name">stackvia</span>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SetupPage({ onSetup }: { onSetup: (username: string, password: string) => Promise<void> }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (password !== confirm) { setError('Passwords do not match'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await onSetup(username, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Setup failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthCard>
+      <h1 className="auth-title">Create admin account</h1>
+      <p className="auth-subtitle">This is the first time stackvia is running. Set up your administrator credentials to secure the dashboard.</p>
+      <form className="auth-form" onSubmit={handleSubmit}>
+        <div className="auth-field">
+          <label htmlFor="setup-username">Username</label>
+          <input
+            id="setup-username"
+            type="text"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="admin"
+            required
+          />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="setup-password">Password</label>
+          <input
+            id="setup-password"
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Min. 8 characters"
+            required
+          />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="setup-confirm">Confirm password</label>
+          <input
+            id="setup-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Repeat password"
+            required
+          />
+        </div>
+        {error && <p className="auth-error">{error}</p>}
+        <button type="submit" className="auth-submit" disabled={busy}>
+          {busy ? 'Creating account…' : 'Create account & sign in'}
+        </button>
+        <p className="auth-hint">Once created, this account cannot be changed through the UI. Edit the database file directly to reset credentials.</p>
+      </form>
+    </AuthCard>
+  );
+}
+
+function LoginPage({ onLogin }: { onLogin: (username: string, password: string) => Promise<void> }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await onLogin(username, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthCard>
+      <h1 className="auth-title">Welcome back</h1>
+      <p className="auth-subtitle">Sign in to your stackvia instance.</p>
+      <form className="auth-form" onSubmit={handleSubmit}>
+        <div className="auth-field">
+          <label htmlFor="login-username">Username</label>
+          <input
+            id="login-username"
+            type="text"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="admin"
+            required
+          />
+        </div>
+        <div className="auth-field">
+          <label htmlFor="login-password">Password</label>
+          <input
+            id="login-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Your password"
+            required
+          />
+        </div>
+        {error && <p className="auth-error">{error}</p>}
+        <button type="submit" className="auth-submit" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </AuthCard>
+  );
+}
+
+function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: () => void }) {
+  const { snapshots, status: dockerStatus, isStreaming } = useLiveContainers();
   const [filter, setFilter] = useState<ContainerStateFilter>('all');
   const [locationPath, setLocationPath] = useState(() => window.location.pathname);
   const [liveHistoryById, setLiveHistoryById] = useState<Record<string, HistoryPoint[]>>({});
@@ -918,16 +1063,16 @@ export function App() {
         <a className="brand" href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><span className="brand-mark">S</span><span>stackvia</span></a>
         <div className="workspace"><span>WORKSPACE</span><button type="button">Personal workspace <b>⌄</b></button></div>
         <nav>
-          <a className={!isDetailPage ? 'active' : ''} href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><Icon name="grid" />Overview</a>
+          <a className={!isDetailPage && !isDatabasePage ? 'active' : ''} href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><Icon name="grid" />Overview</a>
           <a className={isDetailPage ? 'active' : ''} href="/containers"><Icon name="box" />Containers <em>{totals.running}</em></a>
           <a className={isDatabasePage ? 'active' : ''} href="/databases" onClick={(event) => { event.preventDefault(); handleNavigate('/databases'); }}><Icon name="database" />Databases</a>
         </nav>
         <div className="sidebar-bottom">
           <a href="#settings"><Icon name="settings" />Settings</a>
           <div className="user">
-            <span>VS</span>
-            <div><b>Local admin</b><small>Self-hosted</small></div>
-            <button type="button" aria-label="Account menu">•••</button>
+            <span>{username.slice(0, 2).toUpperCase()}</span>
+            <div><b>{username}</b><small>Self-hosted</small></div>
+            <button type="button" className="logout-button" onClick={onLogout} aria-label="Sign out">Sign out</button>
           </div>
         </div>
       </aside>
@@ -944,7 +1089,7 @@ export function App() {
                 <p className="subtle">Here’s what’s happening across your services.</p>
               </div>
               <div className="header-actions">
-                <span className={`connection ${isStreaming && status.connected ? 'connected' : ''}`}><i />{status.mode === 'demo' ? 'Demo telemetry' : isStreaming && status.connected ? 'Live connection' : 'Connecting…'}</span>
+                <span className={`connection ${isStreaming && dockerStatus.connected ? 'connected' : ''}`}><i />{dockerStatus.mode === 'demo' ? 'Demo telemetry' : isStreaming && dockerStatus.connected ? 'Live connection' : 'Connecting…'}</span>
                 <button type="button" className="button secondary" title="Database explorer arrives in Phase 2"><Icon name="plus" />Add database</button>
               </div>
             </header>
@@ -988,8 +1133,8 @@ export function App() {
                 <div className="empty-state">
                   <div className="empty-icon"><Icon name="box" /></div>
                   <div>
-                    <h3>{status.mode === 'unavailable' ? 'Docker is not connected' : 'No containers match this filter'}</h3>
-                    <p>{status.mode === 'unavailable' ? 'Mount /var/run/docker.sock into Stackvia to start monitoring this host.' : 'Try another filter to reveal paused or exited containers.'}</p>
+                    <h3>{dockerStatus.mode === 'unavailable' ? 'Docker is not connected' : 'No containers match this filter'}</h3>
+                    <p>{dockerStatus.mode === 'unavailable' ? 'Mount /var/run/docker.sock into Stackvia to start monitoring this host.' : 'Try another filter to reveal paused or exited containers.'}</p>
                   </div>
                   <code>-v /var/run/docker.sock:/var/run/docker.sock:ro</code>
                 </div>
@@ -1005,10 +1150,10 @@ export function App() {
                 <span className="frequency">10 second interval</span>
               </div>
               <div className="activity-line">
-                <i className={status.connected ? 'pulse' : ''} />
+                <i className={dockerStatus.connected ? 'pulse' : ''} />
                 <div>
-                  <b>{status.connected ? 'Collector is healthy' : 'Collector is standing by'}</b>
-                  <span>{status.lastCollectedAt ? `Last check ${shortDate(status.lastCollectedAt)}` : status.message ?? 'Waiting for a Docker connection'}</span>
+                  <b>{dockerStatus.connected ? 'Collector is healthy' : 'Collector is standing by'}</b>
+                  <span>{dockerStatus.lastCollectedAt ? `Last check ${shortDate(dockerStatus.lastCollectedAt)}` : dockerStatus.message ?? 'Waiting for a Docker connection'}</span>
                 </div>
                 <span className="activity-tail">SQLite · WAL enabled</span>
               </div>
@@ -1025,4 +1170,26 @@ export function App() {
       </main>
     </div>
   );
+}
+
+export function App() {
+  const { status, setup, login, logout } = useAuth();
+  if (status.phase === 'loading') {
+    return (
+      <div className="auth-loading">
+        <div className="auth-spinner" />
+        <span>Loading stackvia…</span>
+      </div>
+    );
+  }
+
+  if (status.phase === 'setup') {
+    return <SetupPage onSetup={setup} />;
+  }
+
+  if (status.phase === 'login') {
+    return <LoginPage onLogin={login} />;
+  }
+
+  return <AuthenticatedApp username={status.username} onLogout={logout} />;
 }

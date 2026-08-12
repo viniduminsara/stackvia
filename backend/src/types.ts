@@ -43,3 +43,10 @@ export type ExplorerDocument = {
   _id: unknown;
   [key: string]: unknown;
 };
+
+export type AdminUser = {
+  username: string;
+  passwordHash: string;
+  createdAt: number;
+};
+
