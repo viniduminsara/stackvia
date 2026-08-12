@@ -4,6 +4,7 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startCollector } from './collector.js';
+import { databasesRouter } from './routes/databases.js';
 import { containersRouter } from './routes/containers.js';
 import { streamRouter } from './routes/stream.js';
 
@@ -14,6 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'stackvia' }));
 app.use('/api/containers', containersRouter);
+app.use('/api/databases', databasesRouter);
 app.use('/api/stream', streamRouter);
 
 const staticCandidates = [resolve(process.cwd(), 'frontend/dist'), resolve(process.cwd(), '../frontend/dist')];

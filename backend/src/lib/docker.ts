@@ -1,7 +1,7 @@
 import Docker from 'dockerode';
 import type { ContainerSnapshot, MonitorStatus } from '../types.js';
 
-const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+export const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 const demoStartedAt = Date.now();
 
 function number(value: unknown): number {
@@ -66,5 +66,72 @@ export async function getSnapshots(): Promise<{ snapshots: ContainerSnapshot[]; 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to reach the Docker socket';
     return { snapshots: [], status: { connected: false, mode: 'unavailable', message } };
+  }
+}
+
+export async function detectMongoContainers() {
+  if (process.env.DEMO_MODE === 'true') {
+    return [
+      {
+        id: 'demo-mongodb-primary',
+        name: 'mongodb-primary',
+        image: 'mongo:7.0',
+        uris: ['mongodb://localhost:27017']
+      }
+    ];
+  }
+
+  try {
+    const containers = await docker.listContainers({ all: false });
+    const mongoContainers = [];
+
+    for (const container of containers) {
+      const isMongoImage = container.Image.toLowerCase().includes('mongo');
+      const isMongoName = container.Names.some((name) => name.toLowerCase().includes('mongo'));
+      const hasMongoPort = container.Ports.some((p) => p.PrivatePort === 27017);
+
+      if (isMongoImage || isMongoName || hasMongoPort) {
+        const uris: string[] = [];
+        const containerName = container.Names[0]?.replace(/^\//, '');
+
+        // 1. Try container name
+        if (containerName) {
+          uris.push(`mongodb://${containerName}:27017`);
+        }
+
+        // 2. Try container network IPs
+        if (container.NetworkSettings?.Networks) {
+          for (const net of Object.values(container.NetworkSettings.Networks)) {
+            if (net.IPAddress) {
+              uris.push(`mongodb://${net.IPAddress}:27017`);
+            }
+          }
+        }
+
+        // 3. Try host mapped ports (useful if running in host mode or dev mode)
+        if (container.Ports) {
+          for (const port of container.Ports) {
+            if (port.PrivatePort === 27017 && port.PublicPort) {
+              uris.push(`mongodb://127.0.0.1:${port.PublicPort}`);
+              uris.push(`mongodb://host.docker.internal:${port.PublicPort}`);
+              uris.push(`mongodb://localhost:${port.PublicPort}`);
+            }
+          }
+        }
+
+        const uniqueUris = Array.from(new Set(uris));
+
+        mongoContainers.push({
+          id: container.Id,
+          name: containerName || container.Id.slice(0, 12),
+          image: container.Image,
+          uris: uniqueUris
+        });
+      }
+    }
+    return mongoContainers;
+  } catch (error) {
+    console.error('Failed to detect MongoDB containers:', error);
+    return [];
   }
 }

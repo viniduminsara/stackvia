@@ -1,7 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { Container } from './hooks/useLiveContainers';
 import { useLiveContainers } from './hooks/useLiveContainers';
 import { useContainerHistory, mergeHistorySeries, snapshotToHistoryPoint, type HistoryPoint } from './hooks/useContainerHistory';
+import {
+  createConnection,
+  loadCatalog,
+  loadCollectionDocuments,
+  loadCollectionStats,
+  loadConnections,
+  loadOverview,
+  removeConnection,
+  type CollectionExplorer,
+  type DatabaseConnection,
+  type DatabaseCatalog,
+  type DatabaseOverview,
+  type CollectionStats
+} from './hooks/useDatabases';
 
 type ContainerStateFilter = 'all' | 'running' | 'paused' | 'exited' | 'unknown';
 
@@ -286,6 +300,558 @@ function DetailPage({
   );
 }
 
+function StatRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <article className="db-stat-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint ? <small>{hint}</small> : null}
+    </article>
+  );
+}
+
+function highlightJson(json: string) {
+  if (!json) return '';
+  const escaped = json
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+    
+  return escaped.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, (match) => {
+    let cls = 'json-number';
+    if (/^"/.test(match)) {
+      if (/:$/.test(match)) {
+        cls = 'json-key';
+      } else {
+        cls = 'json-string';
+      }
+    } else if (/true|false/.test(match)) {
+      cls = 'json-boolean';
+    } else if (/null/.test(match)) {
+      cls = 'json-null';
+    }
+    return `<span class="${cls}">${match}</span>`;
+  });
+}
+
+function DocumentCard({ doc }: { doc: Record<string, unknown> }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(doc, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+    }
+  };
+
+  const docId = doc._id !== undefined ? (typeof doc._id === 'string' ? doc._id : JSON.stringify(doc._id)) : 'unknown';
+
+  return (
+    <article className="document-card-container">
+      <div className="document-card-header">
+        <span className="document-id-label">
+          ID: <code className="highlight-id">{docId}</code>
+        </span>
+        <button type="button" className="document-copy-btn" onClick={handleCopy}>
+          {copied ? (
+            <span className="copied-text">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12, marginRight: 4 }}>
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              Copied!
+            </span>
+          ) : (
+            <span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 12, height: 12, marginRight: 4 }}>
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              Copy
+            </span>
+          )}
+        </button>
+      </div>
+      <pre
+        className="document-card-body"
+        dangerouslySetInnerHTML={{ __html: highlightJson(JSON.stringify(doc, null, 2)) }}
+      />
+    </article>
+  );
+}
+
+function DatabaseWorkspace({
+  connectionId,
+  onNavigate
+}: {
+  connectionId: string | null;
+  onNavigate: (path: string) => void;
+}) {
+  const [connections, setConnections] = useState<DatabaseConnection[]>([]);
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
+  const [connectionsError, setConnectionsError] = useState('');
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [name, setName] = useState('');
+  const [uri, setUri] = useState('');
+  const [defaultDatabase, setDefaultDatabase] = useState('');
+  const [catalog, setCatalog] = useState<DatabaseCatalog | null>(null);
+  const [overview, setOverview] = useState<DatabaseOverview | null>(null);
+  const [collectionStats, setCollectionStats] = useState<CollectionStats['stats'] | null>(null);
+  const [documents, setDocuments] = useState<CollectionExplorer | null>(null);
+  const [selectedDatabase, setSelectedDatabase] = useState('');
+  const [selectedCollection, setSelectedCollection] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(12);
+  const [filterDraft, setFilterDraft] = useState('{}');
+  const [filter, setFilter] = useState('');
+  const [documentError, setDocumentError] = useState('');
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [collectionQuery, setCollectionQuery] = useState('');
+
+  const activeConnection = connections.find((item) => item.id === connectionId) ?? null;
+  const activeTitle = activeConnection?.name ?? 'Databases';
+
+  const refreshConnections = async () => {
+    setConnectionsLoading(true);
+    setConnectionsError('');
+    try {
+      const payload = await loadConnections();
+      setConnections(payload.items);
+    } catch (error) {
+      setConnectionsError(error instanceof Error ? error.message : 'Unable to load saved connections');
+    } finally {
+      setConnectionsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshConnections();
+  }, []);
+
+  useEffect(() => {
+    if (!connectionId) {
+      setCatalog(null);
+      setOverview(null);
+      setCollectionStats(null);
+      setDocuments(null);
+      setSelectedDatabase('');
+      setSelectedCollection('');
+      setPage(1);
+      setFilter('');
+      return;
+    }
+
+    let cancelled = false;
+    setCatalog(null);
+    setOverview(null);
+    setCollectionStats(null);
+    setDocuments(null);
+    setSelectedCollection('');
+    setPage(1);
+    setFilter('');
+
+    void (async () => {
+      try {
+        const payload = await loadCatalog(connectionId);
+        if (cancelled) return;
+        setCatalog(payload.item);
+      } catch (error) {
+        if (cancelled) return;
+        setConnectionsError(error instanceof Error ? error.message : 'Unable to load database catalog');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId]);
+
+  useEffect(() => {
+    if (!catalog) return;
+    const fallback = catalog.defaultDatabase || catalog.databaseNames[0] || '';
+    setSelectedDatabase((current) => {
+      if (current && catalog.databaseNames.includes(current)) return current;
+      return fallback;
+    });
+  }, [catalog]);
+
+  useEffect(() => {
+    if (!connectionId || !selectedDatabase) {
+      setOverview(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const payload = await loadOverview(connectionId, selectedDatabase);
+        if (cancelled) return;
+        setOverview(payload.item);
+      } catch (error) {
+        if (!cancelled) setConnectionsError(error instanceof Error ? error.message : 'Unable to load database overview');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, selectedDatabase]);
+
+  useEffect(() => {
+    if (!overview) return;
+    setSelectedCollection((current) => {
+      if (current && overview.collections.some((collection) => collection.name === current)) return current;
+      return overview.collections[0]?.name ?? '';
+    });
+  }, [overview]);
+
+  useEffect(() => {
+    if (!connectionId || !selectedDatabase || !selectedCollection) {
+      setCollectionStats(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const payload = await loadCollectionStats(connectionId, selectedCollection, selectedDatabase);
+        if (!cancelled) setCollectionStats(payload.item.stats);
+      } catch {
+        if (!cancelled) setCollectionStats(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, selectedDatabase, selectedCollection]);
+
+  useEffect(() => {
+    if (!connectionId || !selectedDatabase || !selectedCollection) {
+      setDocuments(null);
+      return;
+    }
+
+    const trimmedFilter = filter.trim();
+    let parsedFilter: Record<string, unknown> | null = null;
+
+    if (trimmedFilter) {
+      try {
+        const parsed = JSON.parse(trimmedFilter);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setDocumentError('Filter must be a JSON object');
+          return;
+        }
+        parsedFilter = parsed as Record<string, unknown>;
+        setDocumentError('');
+      } catch {
+        setDocumentError('Filter must be valid JSON');
+        return;
+      }
+    } else {
+      setDocumentError('');
+    }
+
+    let cancelled = false;
+    setDocumentsLoading(true);
+    void (async () => {
+      try {
+        const payload = await loadCollectionDocuments(connectionId, selectedCollection, {
+          database: selectedDatabase,
+          page,
+          limit,
+          filter: parsedFilter ? JSON.stringify(parsedFilter) : undefined
+        });
+        if (!cancelled) setDocuments(payload.item);
+      } catch (error) {
+        if (!cancelled) {
+          setDocuments(null);
+          setDocumentError(error instanceof Error ? error.message : 'Unable to load documents');
+        }
+      } finally {
+        if (!cancelled) setDocumentsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, selectedDatabase, selectedCollection, page, limit, filter]);
+
+  const handleCreateConnection = async (event: FormEvent) => {
+    event.preventDefault();
+    setCreateBusy(true);
+    setCreateError('');
+    try {
+      const payload = await createConnection({ name, uri, defaultDatabase });
+      setName('');
+      setUri('');
+      setDefaultDatabase('');
+      await refreshConnections();
+      onNavigate(`/databases/${payload.item.id}`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Unable to save the connection');
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const handleDeleteConnection = async (id: string) => {
+    if (!window.confirm('Delete this saved MongoDB connection?')) return;
+    try {
+      await removeConnection(id);
+      await refreshConnections();
+      if (connectionId === id) onNavigate('/databases');
+    } catch (error) {
+      setConnectionsError(error instanceof Error ? error.message : 'Unable to delete the connection');
+    }
+  };
+
+  const dbStats = overview?.dbStats ?? {};
+  const summaryCards = [
+    { label: 'Objects', value: String((dbStats as { objects?: number }).objects ?? overview?.collections.reduce((sum, item) => sum + item.documentCount, 0) ?? 0), hint: 'Estimated document count' },
+    { label: 'Collections', value: String((dbStats as { collections?: number }).collections ?? overview?.collections.length ?? 0), hint: 'Visible collections' },
+    { label: 'Data size', value: bytes(Number((dbStats as { dataSize?: number }).dataSize ?? 0)), hint: 'Logical data stored' },
+    { label: 'Storage size', value: bytes(Number((dbStats as { storageSize?: number }).storageSize ?? 0)), hint: 'On-disk footprint' }
+  ];
+
+  const filteredCollections = (overview?.collections ?? []).filter((c) =>
+    c.name.toLowerCase().includes(collectionQuery.toLowerCase())
+  );
+
+  if (!connectionId) {
+    return (
+      <section className="database-page">
+        <div className="detail-hero">
+          <p className="eyebrow">DATABASES</p>
+          <h1>Saved MongoDB connections</h1>
+          <p className="subtle">Store encrypted connection strings, then inspect MongoDB stats and documents in a read-only explorer.</p>
+        </div>
+
+        <section className="database-layout">
+          <form className="detail-panel database-form" onSubmit={handleCreateConnection}>
+            <div className="section-title">Add connection <span>Encrypted at rest in SQLite</span></div>
+            <div className="database-form-grid">
+              <label>
+                <span>Name</span>
+                <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Production MongoDB" required />
+              </label>
+              <label>
+                <span>Default database</span>
+                <input value={defaultDatabase} onChange={(event) => setDefaultDatabase(event.target.value)} placeholder="appdb" />
+              </label>
+              <label className="database-form-full">
+                <span>MongoDB connection string</span>
+                <textarea value={uri} onChange={(event) => setUri(event.target.value)} placeholder="mongodb://user:password@host:27017/appdb" rows={4} required />
+              </label>
+            </div>
+            {createError ? <p className="form-error">{createError}</p> : null}
+            <button className="button secondary" type="submit" disabled={createBusy}>{createBusy ? 'Saving…' : 'Save connection'}</button>
+          </form>
+
+          <div className="detail-panel">
+            <div className="section-title">Saved connections <span>{connections.length} total</span></div>
+            {connectionsLoading ? <p className="subtle">Loading connections…</p> : null}
+            {connectionsError ? <p className="form-error">{connectionsError}</p> : null}
+            <div className="connection-list">
+              {connections.map((item) => (
+                <article className="connection-card" key={item.id}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong>{item.name}</strong>
+                      {item.id.startsWith('auto-') && (
+                        <span className="soon" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '9px', fontWeight: 600, padding: '2px 6px', margin: 0, textTransform: 'none', fontStyle: 'normal' }}>Auto-detected</span>
+                      )}
+                    </div>
+                    <span>{item.defaultDatabase || 'No default database set'}</span>
+                  </div>
+                  <div className="connection-card-actions">
+                    <button type="button" className="text-button" onClick={() => onNavigate(`/databases/${item.id}`)}>Open <Icon name="arrow" /></button>
+                    {!item.id.startsWith('auto-') && (
+                      <button type="button" className="text-button danger" onClick={() => void handleDeleteConnection(item.id)}>Delete</button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {!connectionsLoading && !connections.length ? <div className="empty-state compact"><div className="empty-icon"><Icon name="database" /></div><div><h3>No databases yet</h3><p>Add your first MongoDB URI to unlock the explorer.</p></div></div> : null}
+            </div>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <section className="database-page">
+      <div className="detail-hero">
+        <button type="button" className="back-link" onClick={() => onNavigate('/databases')}><Icon name="chevronLeft" />Back to connections</button>
+        <p className="eyebrow">DATABASE EXPLORER</p>
+        <div className="detail-title-row">
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h1>{activeTitle}</h1>
+              {activeConnection?.id.startsWith('auto-') && (
+                <span className="soon" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '11px', fontWeight: 600, padding: '4px 8px', margin: 0, textTransform: 'none', fontStyle: 'normal' }}>Auto-detected</span>
+              )}
+            </div>
+            <p className="subtle">Encrypted connection storage, MongoDB stats, and a strict read-only document browser.</p>
+          </div>
+          <span className="detail-state live"><i />Read-only</span>
+        </div>
+      </div>
+
+      <div className="detail-meta-inline">
+        <span><strong>Connection</strong><code>{activeConnection?.id ?? connectionId}</code></span>
+        <span><strong>Default DB</strong><code>{selectedDatabase || activeConnection?.defaultDatabase || 'auto'}</code></span>
+      </div>
+
+      <div className="db-explorer-container">
+        {/* Left Navigator Panel */}
+        <aside className="db-explorer-sidebar">
+          <div className="db-sidebar-section">
+            <label className="db-select" style={{ gap: '4px' }}>
+              <span>Database</span>
+              <select value={selectedDatabase} onChange={(event) => { setSelectedDatabase(event.target.value); setPage(1); }}>
+                {(catalog?.databaseNames ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+          </div>
+          
+          <div className="db-sidebar-section">
+            <input
+              type="text"
+              placeholder="Search collections..."
+              value={collectionQuery}
+              onChange={(e) => setCollectionQuery(e.target.value)}
+              className="collection-search-input"
+            />
+          </div>
+
+          <div className="db-sidebar-section">
+            <span style={{ fontSize: '10px', color: '#8490a3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>Collections</span>
+            <div className="db-collections-list">
+              {filteredCollections.map((collection) => (
+                <button
+                  type="button"
+                  key={collection.name}
+                  className={`collection-list-item ${selectedCollection === collection.name ? 'active' : ''}`}
+                  onClick={() => { setSelectedCollection(collection.name); setPage(1); }}
+                >
+                  <span className="collection-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <ellipse cx="12" cy="5" rx="9" ry="3" />
+                      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                      <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+                    </svg>
+                  </span>
+                  <span className="collection-name">{collection.name}</span>
+                  <span className="collection-badge">{collection.documentCount}</span>
+                </button>
+              ))}
+              {filteredCollections.length === 0 && (
+                <p className="subtle" style={{ padding: '16px 8px', textAlign: 'center', margin: 0 }}>No collections found</p>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* Right Document & Stats Viewer */}
+        <main className="db-explorer-main">
+          {selectedCollection ? (
+            <>
+              {/* Collection stats strip */}
+              <div className="db-main-header">
+                <h2>{selectedCollection}</h2>
+                <div className="db-collection-stats-strip">
+                  <div className="db-stat-pill">
+                    <strong>Documents</strong>
+                    <span>{collectionStats ? collectionStats.documentCount : '...'}</span>
+                  </div>
+                  <div className="db-stat-pill">
+                    <strong>Logical Size</strong>
+                    <span>{collectionStats ? bytes(collectionStats.sizeBytes) : '...'}</span>
+                  </div>
+                  <div className="db-stat-pill">
+                    <strong>Storage Size</strong>
+                    <span>{collectionStats ? bytes(collectionStats.storageSizeBytes) : '...'}</span>
+                  </div>
+                  <div className="db-stat-pill">
+                    <strong>Indexes</strong>
+                    <span>{collectionStats ? `${collectionStats.indexCount} (${bytes(collectionStats.totalIndexSizeBytes)})` : '...'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Query bar */}
+              <div className="query-bar-container">
+                <div className="query-bar-grid">
+                  <div className="query-bar-main">
+                    <span style={{ fontSize: '10px', color: '#8490a3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Filter (JSON)</span>
+                    <div className="query-input-wrapper">
+                      <textarea
+                        value={filterDraft}
+                        onChange={(event) => setFilterDraft(event.target.value)}
+                        rows={1}
+                        className="query-textarea"
+                        placeholder='{"status":"active"}'
+                      />
+                    </div>
+                  </div>
+                  <div className="query-bar-actions">
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginRight: '8px' }}>
+                      <span style={{ fontSize: '10px', color: '#8490a3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Limit</span>
+                      <select value={limit} onChange={(event) => { setLimit(Number(event.target.value)); setPage(1); }} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #dfe3ee' }}>
+                        {[6, 12, 24, 48].map((item) => <option key={item} value={item}>{item}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" className="button" style={{ background: 'linear-gradient(135deg, #7c5cf6, #5d7ef4)', boxShadow: '0 4px 12px rgba(124, 92, 246, 0.2)' }} onClick={() => { setFilter(filterDraft.trim()); setPage(1); }}>Find</button>
+                    <button type="button" className="button secondary" onClick={() => { setFilterDraft('{}'); setFilter(''); setPage(1); }}>Clear</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Documents List */}
+              {documentError ? <p className="form-error">{documentError}</p> : null}
+              
+              <div className="document-list" style={{ marginTop: 0 }}>
+                {documentsLoading ? (
+                  <p className="subtle" style={{ padding: '24px 0', textAlign: 'center' }}>Loading documents…</p>
+                ) : documents?.documents.length ? (
+                  documents.documents.map((doc, index) => (
+                    <DocumentCard key={`${String(doc._id ?? index)}-${index}`} doc={doc} />
+                  ))
+                ) : (
+                  <div className="empty-state" style={{ minHeight: '140px', gridTemplateColumns: '1fr', textAlign: 'center', padding: '32px' }}>
+                    <p className="subtle" style={{ margin: 0, fontSize: '13px' }}>No documents found for this collection matching the filter.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Pager */}
+              <div className="pager">
+                <button type="button" className="button secondary" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+                <span>Page {page}</span>
+                <button type="button" className="button secondary" disabled={!documents?.hasMore} onClick={() => setPage((current) => current + 1)}>Next</button>
+              </div>
+            </>
+          ) : (
+            <div className="detail-panel" style={{ minHeight: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '40px' }}>
+              <div className="empty-icon" style={{ marginBottom: '16px' }}><Icon name="database" /></div>
+              <h2>Welcome to {activeTitle}</h2>
+              <p className="subtle" style={{ maxWidth: '420px', fontSize: '13px', lineHeight: '1.6' }}>
+                Select a collection on the left navigator pane to start exploring documents, searching stats, and running queries in a read-only workspace.
+              </p>
+            </div>
+          )}
+        </main>
+      </div>
+    </section>
+  );
+}
+
 export function App() {
   const { snapshots, status, isStreaming } = useLiveContainers();
   const [filter, setFilter] = useState<ContainerStateFilter>('all');
@@ -310,9 +876,11 @@ export function App() {
   }, [snapshots]);
 
   const containerId = locationPath.startsWith('/containers/') ? decodeURIComponent(locationPath.slice('/containers/'.length)) : null;
+  const databaseId = locationPath.startsWith('/databases/') ? decodeURIComponent(locationPath.slice('/databases/'.length)) : null;
   const selectedContainer = containerId ? snapshots.find((snapshot) => snapshot.id === containerId) ?? null : null;
   const selectedHistory = useContainerHistory(containerId, selectedContainer);
   const isDetailPage = Boolean(containerId);
+  const isDatabasePage = locationPath === '/databases' || Boolean(databaseId);
 
   const totals = useMemo(() => ({
     running: snapshots.filter((item) => item.state === 'running').length,
@@ -352,7 +920,7 @@ export function App() {
         <nav>
           <a className={!isDetailPage ? 'active' : ''} href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><Icon name="grid" />Overview</a>
           <a className={isDetailPage ? 'active' : ''} href="/containers"><Icon name="box" />Containers <em>{totals.running}</em></a>
-          <a href="#databases"><Icon name="database" />Databases <span className="soon">Soon</span></a>
+          <a className={isDatabasePage ? 'active' : ''} href="/databases" onClick={(event) => { event.preventDefault(); handleNavigate('/databases'); }}><Icon name="database" />Databases</a>
         </nav>
         <div className="sidebar-bottom">
           <a href="#settings"><Icon name="settings" />Settings</a>
@@ -365,7 +933,9 @@ export function App() {
       </aside>
 
       <main>
-        {!isDetailPage ? (
+        {isDatabasePage ? (
+          <DatabaseWorkspace connectionId={databaseId} onNavigate={handleNavigate} />
+        ) : !isDetailPage ? (
           <>
             <header>
               <div>
