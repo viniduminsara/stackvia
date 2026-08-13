@@ -113,36 +113,10 @@ select:focus {
   box-shadow: 0 8px 20px rgba(121, 92, 246, 0.32);
 }
 
-.workspace {
+.sidebar-nav {
   border-top: 1px solid #273044;
-  margin: 29px 7px 23px;
-  padding: 21px 5px 0;
-}
-
-.workspace > span,
-.eyebrow {
-  display: block;
-  color: #8a96ae;
-  font: 500 10px/1.3 'DM Mono', monospace;
-  letter-spacing: 1.15px;
-}
-
-.workspace button {
-  background: none;
-  border: 0;
-  color: #d9deeb;
-  font-size: 12px;
-  width: 100%;
-  padding: 8px 0 0;
-  display: flex;
-  justify-content: space-between;
-  text-align: left;
-}
-
-.workspace b {
-  font-size: 16px;
-  font-weight: 400;
-  color: #8490a8;
+  margin: 23px 7px 23px;
+  padding: 16px 0px 0;
 }
 
 nav {
@@ -445,6 +419,11 @@ h3 {
 
 .services-section {
   margin-top: 48px;
+}
+
+.containers-page {
+  display: grid;
+  gap: 20px;
 }
 
 .section-header {
@@ -993,13 +972,13 @@ h3 {
 
 .database-page {
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 
 .database-layout {
   display: grid;
   grid-template-columns: 1fr 1.05fr;
-  gap: 14px;
+  gap: 12px;
 }
 
 .database-form label,
@@ -1023,7 +1002,7 @@ h3 {
 .database-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .database-form-full {
@@ -1075,8 +1054,44 @@ h3 {
   justify-content: flex-end;
 }
 
+.connection-card-actions .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d8def0;
+  background: #f8faff;
+  color: #4f5a71;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 1px 2px rgba(31, 41, 55, 0.05);
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.connection-card-actions .text-button:hover {
+  transform: translateY(-1px);
+  border-color: #c7b8ff;
+  background: #eef2ff;
+  color: #3f2f88;
+}
+
+.connection-card-actions .text-button svg {
+  width: 12px;
+  height: 12px;
+}
+
 .connection-card-actions .text-button.danger {
   color: #b42318;
+  border-color: #fecaca;
+  background: #fff5f5;
+}
+
+.connection-card-actions .text-button.danger:hover {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .compact {
@@ -1173,6 +1188,28 @@ h3 {
 
 .detail-panel {
   padding: 18px;
+}
+
+.database-page .detail-hero {
+  gap: 10px;
+}
+
+.database-page .detail-panel {
+  padding: 14px;
+}
+
+.database-page .detail-meta-inline {
+  gap: 8px;
+}
+
+.database-page .detail-meta-inline span {
+  padding: 7px 10px;
+}
+
+.database-page .detail-summary-grid,
+.database-page .detail-charts,
+.database-page .detail-grid {
+  gap: 12px;
 }
 
 .section-title {
@@ -1366,19 +1403,19 @@ h3 {
 .db-explorer-container {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  gap: 24px;
+  gap: 16px;
   align-items: start;
-  margin-top: 20px;
+  margin-top: 12px;
 }
 
 .db-explorer-sidebar {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #e8e9ef;
   border-radius: 16px;
-  padding: 16px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   box-shadow: 0 14px 30px rgba(37, 33, 67, 0.04);
 }
 
@@ -1476,14 +1513,14 @@ h3 {
 .db-explorer-main {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 .db-main-header {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #e8e9ef;
   border-radius: 16px;
-  padding: 20px;
+  padding: 14px;
   box-shadow: 0 14px 30px rgba(37, 33, 67, 0.04);
 }
 
@@ -1529,7 +1566,7 @@ h3 {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #e8e9ef;
   border-radius: 16px;
-  padding: 16px;
+  padding: 12px;
   box-shadow: 0 14px 30px rgba(37, 33, 67, 0.04);
 }
 
@@ -1862,4 +1899,3 @@ h3 {
 .logout-button:hover {
   color: #d0665d;
 }
-

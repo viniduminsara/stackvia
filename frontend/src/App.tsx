@@ -301,6 +301,198 @@ function DetailPage({
   );
 }
 
+function ContainerListSection({
+  snapshots,
+  dockerStatus,
+  isStreaming,
+  filter,
+  setFilter,
+  historyForContainer,
+  onOpenContainer,
+  title = 'Containers',
+  description = 'Running services float to the top. Filter by state to focus on what matters.',
+  emptyTitle,
+  emptyDescription
+}: {
+  snapshots: Container[];
+  dockerStatus: { connected: boolean; mode: 'docker' | 'demo' | 'unavailable' };
+  isStreaming: boolean;
+  filter: ContainerStateFilter;
+  setFilter: (value: ContainerStateFilter) => void;
+  historyForContainer: (container: Container) => HistoryPoint[];
+  onOpenContainer: (id: string) => void;
+  title?: string;
+  description?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+}) {
+  const filteredContainers = snapshots
+    .filter((container) => filter === 'all' || container.state === filter)
+    .slice()
+    .sort((left, right) => {
+      const stateDelta = STATE_ORDER[left.state] - STATE_ORDER[right.state];
+      if (stateDelta) return stateDelta;
+      return left.name.localeCompare(right.name);
+    });
+
+  return (
+    <section className="services-section" id="containers">
+      <div className="section-header">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <div className="container-toolbar">
+          <span className={`connection ${isStreaming && dockerStatus.connected ? 'connected' : ''}`}><i />{dockerStatus.mode === 'demo' ? 'Demo telemetry' : isStreaming && dockerStatus.connected ? 'Live connection' : 'Connecting…'}</span>
+          <span className="frequency">{snapshots.length} containers</span>
+          <div className="filters" role="tablist" aria-label="Container state filter">
+            {FILTERS.map((option) => {
+              const count = option.value === 'all' ? snapshots.length : snapshots.filter((container) => container.state === option.value).length;
+              return <FilterChip key={option.value} value={option.value} label={option.label} active={filter === option.value} count={count} onClick={setFilter} />;
+            })}
+          </div>
+        </div>
+      </div>
+
+      {filteredContainers.length ? (
+        <div className="container-grid">
+          {filteredContainers.map((container) => (
+            <ContainerCard
+              key={container.id}
+              container={container}
+              history={historyForContainer(container)}
+              onOpen={() => onOpenContainer(container.id)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">
+          <div className="empty-icon"><Icon name="box" /></div>
+          <div>
+            <h3>{emptyTitle ?? (dockerStatus.mode === 'unavailable' ? 'Docker is not connected' : 'No containers match this filter')}</h3>
+            <p>{emptyDescription ?? (dockerStatus.mode === 'unavailable' ? 'Mount /var/run/docker.sock into Stackvia to start monitoring this host.' : 'Try another filter to reveal paused or exited containers.')}</p>
+          </div>
+          <code>-v /var/run/docker.sock:/var/run/docker.sock:ro</code>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OverviewPage({
+  snapshots,
+  dockerStatus,
+  isStreaming,
+  filter,
+  setFilter,
+  onNavigate,
+  totals,
+  overviewHistory,
+  listTitle
+}: {
+  snapshots: Container[];
+  dockerStatus: { connected: boolean; mode: 'docker' | 'demo' | 'unavailable'; message?: string; lastCollectedAt?: number };
+  isStreaming: boolean;
+  filter: ContainerStateFilter;
+  setFilter: (value: ContainerStateFilter) => void;
+  onNavigate: (path: string) => void;
+  overviewHistory: (container: Container) => HistoryPoint[];
+  totals: { running: number; paused: number; exited: number; unknown: number; cpu: number; memory: number; network: number };
+  listTitle: string;
+}) {
+  return (
+    <>
+      <header>
+        <div>
+          <p className="eyebrow">INFRASTRUCTURE OVERVIEW</p>
+          <h1>Good morning</h1>
+          <p className="subtle">Here’s what’s happening across your services.</p>
+        </div>
+        <div className="header-actions">
+          <span className={`connection ${isStreaming && dockerStatus.connected ? 'connected' : ''}`}><i />{dockerStatus.mode === 'demo' ? 'Demo telemetry' : isStreaming && dockerStatus.connected ? 'Live connection' : 'Connecting…'}</span>
+        </div>
+      </header>
+
+      <section className="metrics" id="overview">
+        <StatCard label="Running containers" value={`${totals.running}`} detail={totals.running ? 'All services reporting' : 'Waiting for Docker'} tone="green" />
+        <StatCard label="Paused containers" value={`${totals.paused}`} detail={totals.paused ? 'Temporarily stopped' : 'No paused containers'} />
+        <StatCard label="Total CPU usage" value={percent(totals.cpu)} detail="Across visible containers" />
+        <StatCard label="Memory in use" value={bytes(totals.memory)} detail="Container memory footprint" tone="blue" />
+      </section>
+
+      <ContainerListSection
+        snapshots={snapshots}
+        dockerStatus={dockerStatus}
+        isStreaming={isStreaming}
+        filter={filter}
+        setFilter={setFilter}
+        historyForContainer={overviewHistory}
+        onOpenContainer={(id) => onNavigate(`/containers/${encodeURIComponent(id)}`)}
+        title={listTitle}
+        description="Running services float to the top. Filter by state to focus on what matters."
+      />
+
+      <section className="activity">
+        <div className="section-header">
+          <div>
+            <h2>Collector activity</h2>
+            <p>Persistent metrics are stored locally in SQLite.</p>
+          </div>
+          <span className="frequency">10 second interval</span>
+        </div>
+        <div className="activity-line">
+          <i className={dockerStatus.connected ? 'pulse' : ''} />
+          <div>
+            <b>{dockerStatus.connected ? 'Collector is healthy' : 'Collector is standing by'}</b>
+            <span>{dockerStatus.lastCollectedAt ? `Last check ${shortDate(dockerStatus.lastCollectedAt)}` : dockerStatus.message ?? 'Waiting for a Docker connection'}</span>
+          </div>
+          <span className="activity-tail">SQLite · WAL enabled</span>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ContainersPage({
+  snapshots,
+  dockerStatus,
+  isStreaming,
+  filter,
+  setFilter,
+  historyForContainer,
+  onNavigate
+}: {
+  snapshots: Container[];
+  dockerStatus: { connected: boolean; mode: 'docker' | 'demo' | 'unavailable' };
+  isStreaming: boolean;
+  filter: ContainerStateFilter;
+  setFilter: (value: ContainerStateFilter) => void;
+  historyForContainer: (container: Container) => HistoryPoint[];
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <section className="containers-page">
+      <div className="detail-hero containers-hero">
+        <p className="eyebrow">CONTAINERS</p>
+        <h1>Container view</h1>
+        <p className="subtle">Focused list of live, paused, and exited services without the overview metrics.</p>
+      </div>
+
+      <ContainerListSection
+        snapshots={snapshots}
+        dockerStatus={dockerStatus}
+        isStreaming={isStreaming}
+        filter={filter}
+        setFilter={setFilter}
+        historyForContainer={historyForContainer}
+        onOpenContainer={(id) => onNavigate(`/containers/${encodeURIComponent(id)}`)}
+        title="Containers"
+        description="Filter and inspect your running services."
+      />
+    </section>
+  );
+}
+
 function StatRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <article className="db-stat-row">
@@ -628,8 +820,8 @@ function DatabaseWorkspace({
       <section className="database-page">
         <div className="detail-hero">
           <p className="eyebrow">DATABASES</p>
-          <h1>Saved MongoDB connections</h1>
-          <p className="subtle">Store encrypted connection strings, then inspect MongoDB stats and documents in a read-only explorer.</p>
+          <h1>Saved database connections</h1>
+          <p className="subtle">Store encrypted connection strings, then inspect db stats and documents in a read-only explorer.</p>
         </div>
 
         <section className="database-layout">
@@ -663,9 +855,6 @@ function DatabaseWorkspace({
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <strong>{item.name}</strong>
-                      {item.id.startsWith('auto-') && (
-                        <span className="soon" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '9px', fontWeight: 600, padding: '2px 6px', margin: 0, textTransform: 'none', fontStyle: 'normal' }}>Auto-detected</span>
-                      )}
                     </div>
                     <span>{item.defaultDatabase || 'No default database set'}</span>
                   </div>
@@ -695,10 +884,10 @@ function DatabaseWorkspace({
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <h1>{activeTitle}</h1>
               {activeConnection?.id.startsWith('auto-') && (
-                <span className="soon" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '11px', fontWeight: 600, padding: '4px 8px', margin: 0, textTransform: 'none', fontStyle: 'normal' }}>Auto-detected</span>
+                <span className="soon" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '11px', fontWeight: 600, padding: '4px 8px', margin: 0, textTransform: 'none', fontStyle: 'normal' }}>detected</span>
               )}
             </div>
-            <p className="subtle">Encrypted connection storage, MongoDB stats, and a strict read-only document browser.</p>
+            <p className="subtle">Encrypted connection storage, stats, and a strict read-only document browser.</p>
           </div>
           <span className="detail-state live"><i />Read-only</span>
         </div>
@@ -760,7 +949,7 @@ function DatabaseWorkspace({
         </aside>
 
         {/* Right Document & Stats Viewer */}
-        <main className="db-explorer-main">
+        <div className="db-explorer-main">
           {selectedCollection ? (
             <>
               {/* Collection stats strip */}
@@ -847,7 +1036,7 @@ function DatabaseWorkspace({
               </p>
             </div>
           )}
-        </main>
+        </div>
       </div>
     </section>
   );
@@ -1025,6 +1214,7 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
   const selectedContainer = containerId ? snapshots.find((snapshot) => snapshot.id === containerId) ?? null : null;
   const selectedHistory = useContainerHistory(containerId, selectedContainer);
   const isDetailPage = Boolean(containerId);
+  const isContainersPage = locationPath === '/containers';
   const isDatabasePage = locationPath === '/databases' || Boolean(databaseId);
 
   const totals = useMemo(() => ({
@@ -1037,17 +1227,6 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
     network: snapshots.reduce((sum, item) => sum + item.networkRxBytes + item.networkTxBytes, 0)
   }), [snapshots]);
 
-  const filteredContainers = useMemo(() => {
-    return snapshots
-      .filter((container) => filter === 'all' || container.state === filter)
-      .slice()
-      .sort((left, right) => {
-        const stateDelta = STATE_ORDER[left.state] - STATE_ORDER[right.state];
-        if (stateDelta) return stateDelta;
-        return left.name.localeCompare(right.name);
-      });
-  }, [snapshots, filter]);
-
   const handleNavigate = (path: string) => {
     window.history.pushState({}, '', path);
     setLocationPath(path);
@@ -1055,16 +1234,15 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
   };
 
   const overviewHistory = (container: Container) => liveHistoryById[container.id] ?? [];
-  const listTitle = isDetailPage ? 'Container detail' : 'Containers';
+  const listTitle = 'Containers';
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <a className="brand" href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><span className="brand-mark">S</span><span>stackvia</span></a>
-        <div className="workspace"><span>WORKSPACE</span><button type="button">Personal workspace <b>⌄</b></button></div>
-        <nav>
-          <a className={!isDetailPage && !isDatabasePage ? 'active' : ''} href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><Icon name="grid" />Overview</a>
-          <a className={isDetailPage ? 'active' : ''} href="/containers"><Icon name="box" />Containers <em>{totals.running}</em></a>
+        <nav className="sidebar-nav">
+          <a className={locationPath === '/' ? 'active' : ''} href="/" onClick={(event) => { event.preventDefault(); handleNavigate('/'); }}><Icon name="grid" />Overview</a>
+          <a className={isDetailPage || isContainersPage ? 'active' : ''} href="/containers" onClick={(event) => { event.preventDefault(); handleNavigate('/containers'); }}><Icon name="box" />Containers <em>{totals.running}</em></a>
           <a className={isDatabasePage ? 'active' : ''} href="/databases" onClick={(event) => { event.preventDefault(); handleNavigate('/databases'); }}><Icon name="database" />Databases</a>
         </nav>
         <div className="sidebar-bottom">
@@ -1080,91 +1258,34 @@ function AuthenticatedApp({ username, onLogout }: { username: string; onLogout: 
       <main>
         {isDatabasePage ? (
           <DatabaseWorkspace connectionId={databaseId} onNavigate={handleNavigate} />
+        ) : isContainersPage ? (
+          <ContainersPage
+            snapshots={snapshots}
+            dockerStatus={dockerStatus}
+            isStreaming={isStreaming}
+            filter={filter}
+            setFilter={setFilter}
+            historyForContainer={overviewHistory}
+            onNavigate={handleNavigate}
+          />
         ) : !isDetailPage ? (
-          <>
-            <header>
-              <div>
-                <p className="eyebrow">INFRASTRUCTURE OVERVIEW</p>
-                <h1>Good morning</h1>
-                <p className="subtle">Here’s what’s happening across your services.</p>
-              </div>
-              <div className="header-actions">
-                <span className={`connection ${isStreaming && dockerStatus.connected ? 'connected' : ''}`}><i />{dockerStatus.mode === 'demo' ? 'Demo telemetry' : isStreaming && dockerStatus.connected ? 'Live connection' : 'Connecting…'}</span>
-                <button type="button" className="button secondary" title="Database explorer arrives in Phase 2"><Icon name="plus" />Add database</button>
-              </div>
-            </header>
-
-            <section className="metrics" id="overview">
-              <StatCard label="Running containers" value={`${totals.running}`} detail={totals.running ? 'All services reporting' : 'Waiting for Docker'} tone="green" />
-              <StatCard label="Paused containers" value={`${totals.paused}`} detail={totals.paused ? 'Temporarily stopped' : 'No paused containers'} />
-              <StatCard label="Total CPU usage" value={percent(totals.cpu)} detail="Across visible containers" />
-              <StatCard label="Memory in use" value={bytes(totals.memory)} detail="Container memory footprint" tone="blue" />
-            </section>
-
-            <section className="services-section" id="containers">
-              <div className="section-header">
-                <div>
-                  <h2>{listTitle}</h2>
-                  <p>Running services float to the top. Filter by state to focus on what matters.</p>
-                </div>
-                <div className="container-toolbar">
-                  <span className="frequency">{snapshots.length} containers</span>
-                  <div className="filters" role="tablist" aria-label="Container state filter">
-                    {FILTERS.map((option) => {
-                      const count = option.value === 'all' ? snapshots.length : snapshots.filter((container) => container.state === option.value).length;
-                      return <FilterChip key={option.value} value={option.value} label={option.label} active={filter === option.value} count={count} onClick={setFilter} />;
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {filteredContainers.length ? (
-                <div className="container-grid">
-                  {filteredContainers.map((container) => (
-                    <ContainerCard
-                      key={container.id}
-                      container={container}
-                      history={overviewHistory(container)}
-                      onOpen={() => handleNavigate(`/containers/${encodeURIComponent(container.id)}`)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <div className="empty-icon"><Icon name="box" /></div>
-                  <div>
-                    <h3>{dockerStatus.mode === 'unavailable' ? 'Docker is not connected' : 'No containers match this filter'}</h3>
-                    <p>{dockerStatus.mode === 'unavailable' ? 'Mount /var/run/docker.sock into Stackvia to start monitoring this host.' : 'Try another filter to reveal paused or exited containers.'}</p>
-                  </div>
-                  <code>-v /var/run/docker.sock:/var/run/docker.sock:ro</code>
-                </div>
-              )}
-            </section>
-
-            <section className="activity">
-              <div className="section-header">
-                <div>
-                  <h2>Collector activity</h2>
-                  <p>Persistent metrics are stored locally in SQLite.</p>
-                </div>
-                <span className="frequency">10 second interval</span>
-              </div>
-              <div className="activity-line">
-                <i className={dockerStatus.connected ? 'pulse' : ''} />
-                <div>
-                  <b>{dockerStatus.connected ? 'Collector is healthy' : 'Collector is standing by'}</b>
-                  <span>{dockerStatus.lastCollectedAt ? `Last check ${shortDate(dockerStatus.lastCollectedAt)}` : dockerStatus.message ?? 'Waiting for a Docker connection'}</span>
-                </div>
-                <span className="activity-tail">SQLite · WAL enabled</span>
-              </div>
-            </section>
-          </>
+          <OverviewPage
+            snapshots={snapshots}
+            dockerStatus={dockerStatus}
+            isStreaming={isStreaming}
+            filter={filter}
+            setFilter={setFilter}
+            onNavigate={handleNavigate}
+            overviewHistory={overviewHistory}
+            totals={totals}
+            listTitle={listTitle}
+          />
         ) : (
           <DetailPage
             container={selectedContainer}
             containerId={containerId ?? ''}
             history={selectedHistory}
-            onBack={() => handleNavigate('/')}
+            onBack={() => handleNavigate('/containers')}
           />
         )}
       </main>

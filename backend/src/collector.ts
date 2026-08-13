@@ -27,7 +27,7 @@ async function autoDetectDatabases() {
 
     if (!existingAutoIds.includes(connId)) {
       if (process.env.DEMO_MODE === 'true') {
-        const name = `Auto-detected Mongo (${container.name})`;
+        const name = `Mongo DB (${container.name})`;
         const encrypted = encryptSecret('mongodb://localhost:27017');
         createDatabaseConnection({
           id: connId,
@@ -42,7 +42,7 @@ async function autoDetectDatabases() {
       } else {
         const workingUri = await findWorkingUri(container.uris);
         if (workingUri) {
-          const name = `Auto-detected Mongo (${container.name})`;
+          const name = `Mongo DB (${container.name})`;
           const encrypted = encryptSecret(workingUri);
           createDatabaseConnection({
             id: connId,
