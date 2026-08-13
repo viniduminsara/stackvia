@@ -1,8 +1,17 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { getAdmin, createAdmin } from '../lib/store.js';
 import { hashPassword, verifyPassword, issueSession, requireAuth } from '../lib/auth.js';
 
 export const authRouter = Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, try again later' }
+});
 
 function respondError(res: any, status: number, message: string) {
   return res.status(status).json({ error: message });
@@ -45,7 +54,7 @@ authRouter.post('/setup', (req, res) => {
   res.status(201).json({ success: true, username });
 });
 
-authRouter.post('/login', (req, res) => {
+authRouter.post('/login', loginLimiter, (req, res) => {
   const admin = getAdmin();
   if (!admin) {
     return respondError(res, 400, 'Setup required');

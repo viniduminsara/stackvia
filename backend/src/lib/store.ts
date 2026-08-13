@@ -149,11 +149,17 @@ export function getAdmin(): AdminUser | undefined {
 }
 
 export function createAdmin(username: string, passwordHash: string): boolean {
-  const result = insertAdminStatement.run({
-    username,
-    passwordHash,
-    createdAt: Date.now()
-  });
-  return result.changes > 0;
+  try {
+    const result = insertAdminStatement.run({
+      username,
+      passwordHash,
+      createdAt: Date.now()
+    });
+    return result.changes > 0;
+  } catch (error) {
+    if (error instanceof Error && (error as { code?: string }).code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
+      return false;
+    }
+    throw error;
+  }
 }
-
